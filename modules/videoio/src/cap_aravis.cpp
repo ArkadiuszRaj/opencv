@@ -131,8 +131,10 @@ protected:
 
     int             widthMin;               // Camera sensor minium width.
     int             widthMax;               // Camera sensor maximum width.
-    int             heightMin;              // Camera sensor minium height.
+    int             heightMin;              // Camera sensor minimum height.
     int             heightMax;              // Camera sensor maximum height.
+    int             regionWidth;            // Camera sensor region width.
+    int             regionHeight;           // Camera sensor region height.
     bool            fpsAvailable;
     double          fpsMin;                 // Camera minium fps.
     double          fpsMax;                 // Camera maximum fps.
@@ -231,15 +233,16 @@ bool CvCaptureCAM_Aravis::init_buffers()
         stream = NULL;
     }
     if( (stream = arv_camera_create_stream(camera, NULL, NULL)) ) {
-        g_object_set(stream,
-            "socket-buffer", ARV_GV_STREAM_SOCKET_BUFFER_AUTO,
-            "socket-buffer-size", 0, NULL);
-        g_object_set(stream,
-            "packet-resend", ARV_GV_STREAM_PACKET_RESEND_NEVER, NULL);
-        g_object_set(stream,
-            "packet-timeout", (unsigned) 40000,
-            "frame-retention", (unsigned) 200000, NULL);
-
+        if( arv_camera_is_gv_device(camera) ) {
+            g_object_set(stream,
+                "socket-buffer", ARV_GV_STREAM_SOCKET_BUFFER_AUTO,
+                "socket-buffer-size", 0, NULL);
+            g_object_set(stream,
+                "packet-resend", ARV_GV_STREAM_PACKET_RESEND_NEVER, NULL);
+            g_object_set(stream,
+                "packet-timeout", (unsigned) 40000,
+                "frame-retention", (unsigned) 200000, NULL);
+        }
         payload = arv_camera_get_payload (camera);
 
         for (int i = 0; i < num_buffers; i++)
@@ -259,7 +262,7 @@ bool CvCaptureCAM_Aravis::open( int index )
 
         arv_camera_get_width_bounds(camera, &widthMin, &widthMax);
         arv_camera_get_height_bounds(camera, &heightMin, &heightMax);
-        arv_camera_set_region(camera, 0, 0, widthMax, heightMax);
+        arv_camera_set_region(camera, 0, 0, regionWidth = widthMax, regionHeight = heightMax);
 
         if( (fpsAvailable = arv_camera_is_frame_rate_available(camera)) )
             arv_camera_get_frame_rate_bounds(camera, &fpsMin, &fpsMax);
@@ -438,10 +441,10 @@ double CvCaptureCAM_Aravis::getProperty( int property_id ) const
             return (double)frameID/fps;
 
         case CV_CAP_PROP_FRAME_WIDTH:
-            return width;
+            return regionWidth;
 
         case CV_CAP_PROP_FRAME_HEIGHT:
-            return height;
+            return regionHeight;
 
         case CV_CAP_PROP_AUTO_EXPOSURE:
             return (controlExposure ? 1 : 0);
@@ -500,13 +503,23 @@ bool CvCaptureCAM_Aravis::setProperty( int property_id, double value )
 {
     switch(property_id) {
         case CV_CAP_PROP_FRAME_WIDTH:
-            width = value;
-            arv_camera_set_region(camera, (widthMax-width)/2, (heightMax-height)/2, width, height);
+            if((int)value != regionWidth) {
+                regionWidth = value;
+
+                stopCapture();
+                arv_camera_set_region(camera, (widthMax-regionWidth)/2, (heightMax-regionHeight)/2, regionWidth, regionHeight);
+                startCapture();
+            }
             break;
 
         case CV_CAP_PROP_FRAME_HEIGHT:
-            height = value;
-            arv_camera_set_region(camera, (widthMax-width)/2, (heightMax-height)/2, width, height);
+            if((int)value != regionHeight) {
+                regionHeight = value;
+
+                stopCapture();
+                arv_camera_set_region(camera, (widthMax-regionWidth)/2, (heightMax-regionHeight)/2, regionWidth, regionHeight);
+                startCapture();
+            }
             break;
 
         case CV_CAP_PROP_AUTO_EXPOSURE:
@@ -535,7 +548,7 @@ bool CvCaptureCAM_Aravis::setProperty( int property_id, double value )
             if(fpsAvailable) {
                 arv_camera_set_frame_rate(camera, fps = CLIP(value, fpsMin, fpsMax));
                 // ensure current exposure time is not impacting FPS setting
-                if(exposure > 1./fps) 
+                if(exposure > 1./fps)
                     arv_camera_set_exposure_time(camera, exposure = CLIP(1./fps, exposureMin, exposureMax));
                 break;
             } else return false;
