@@ -69,10 +69,10 @@
 //      CAP_PROP_FPS(f)
 //      CAP_PROP_FOURCC(type)
 //      CAP_PROP_BUFFERSIZE(n)
-//  read only:
-//      CAP_PROP_POS_MSEC
 //      CAP_PROP_FRAME_WIDTH
 //      CAP_PROP_FRAME_HEIGHT
+//  read only:
+//      CAP_PROP_POS_MSEC
 //
 //  Supported types of data:
 //      video/x-raw, fourcc:'GREY'  -> 8bit, 1 channel
@@ -446,8 +446,8 @@ double CvCaptureCAM_Aravis::getProperty( int property_id ) const
         case CV_CAP_PROP_AUTO_EXPOSURE:
             return (controlExposure ? 1 : 0);
 
-    case CV_CAP_PROP_BRIGHTNESS:
-        return exposureCompensation;
+        case CV_CAP_PROP_BRIGHTNESS:
+            return exposureCompensation;
 
         case CV_CAP_PROP_EXPOSURE:
             if(exposureAvailable) {
@@ -499,6 +499,16 @@ double CvCaptureCAM_Aravis::getProperty( int property_id ) const
 bool CvCaptureCAM_Aravis::setProperty( int property_id, double value )
 {
     switch(property_id) {
+        case CV_CAP_PROP_FRAME_WIDTH:
+            width = value;
+            arv_camera_set_region(camera, (widthMax-width)/2, (heightMax-height)/2, width, height);
+            break;
+
+        case CV_CAP_PROP_FRAME_HEIGHT:
+            height = value;
+            arv_camera_set_region(camera, (widthMax-width)/2, (heightMax-height)/2, width, height);
+            break;
+
         case CV_CAP_PROP_AUTO_EXPOSURE:
             if(exposureAvailable || gainAvailable) {
                 if( (controlExposure = (bool)(int)value) ) {
@@ -507,9 +517,10 @@ bool CvCaptureCAM_Aravis::setProperty( int property_id, double value )
                 }
             }
             break;
-    case CV_CAP_PROP_BRIGHTNESS:
-       exposureCompensation = CLIP(value, -3., 3.);
-       break;
+
+        case CV_CAP_PROP_BRIGHTNESS:
+            exposureCompensation = CLIP(value, -3., 3.);
+            break;
 
         case CV_CAP_PROP_EXPOSURE:
             if(exposureAvailable) {
@@ -523,6 +534,9 @@ bool CvCaptureCAM_Aravis::setProperty( int property_id, double value )
         case CV_CAP_PROP_FPS:
             if(fpsAvailable) {
                 arv_camera_set_frame_rate(camera, fps = CLIP(value, fpsMin, fpsMax));
+                // ensure current exposure time is not impacting FPS setting
+                if(exposure > 1./fps) 
+                    arv_camera_set_exposure_time(camera, exposure = CLIP(1./fps, exposureMin, exposureMax));
                 break;
             } else return false;
 
