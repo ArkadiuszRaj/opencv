@@ -62,7 +62,7 @@
 //
 // Supported properties:
 //  read/write
-//      CAP_PROP_AUTO_EXPOSURE(0|1)
+//      CAP_PROP_AUTO_EXPOSURE(e), e >=0 use autoexposure, 1-whole image, 2-center 5%, 3-center 20%
 //      CAP_PROP_EXPOSURE(t), t in seconds
 //      CAP_PROP_BRIGHTNESS (ev), exposure compensation in EV for auto exposure algorithm
 //      CAP_PROP_GAIN(g), g >=0 or -1 for automatic control if CAP_PROP_AUTO_EXPOSURE is true
@@ -71,6 +71,7 @@
 //      CAP_PROP_BUFFERSIZE(n)
 //      CAP_PROP_FRAME_WIDTH
 //      CAP_PROP_FRAME_HEIGHT
+//      CAP_PROP_BUFFERSIZE
 //  read only:
 //      CAP_PROP_POS_MSEC
 //
@@ -121,13 +122,14 @@ protected:
 
     bool getDeviceNameById(int id, std::string &device);
 
-    void autoExposureControl(IplImage*);
+    void autoExposureControl(cv::Mat);
 
     ArvCamera       *camera;                // Camera to control.
     ArvStream       *stream;                // Object for video stream reception.
     void            *framebuffer;           //
 
     unsigned int    payload;                // Width x height x Pixel width.
+    int             bufferSize;             // size of circular buffer in sec
 
     int             widthMin;               // Camera sensor minium width.
     int             widthMax;               // Camera sensor maximum width.
@@ -146,15 +148,13 @@ protected:
     double          exposureMax;            // Camera's maximum exposure time.
 
     bool            controlExposure;        // Flag if automatic exposure shall be done by this SW
+    int             meteringMode;           // Metering mode used for autoexposure
     double          exposureCompensation;
     bool            autoGain;
     double          targetGrey;             // Target grey value (mid grey))
 
     gint64          *pixelFormats;
     guint           pixelFormatsCnt;
-
-
-    int             num_buffers;            // number of payload transmission buffers
 
     ArvPixelFormat  pixelFormat;            // pixel format
 
@@ -171,7 +171,7 @@ protected:
     unsigned        frameID;                // current frame id
     unsigned        prevFrameID;
 
-    IplImage        *frame;                 // local frame copy
+    cv::Mat         frame;                  // current image in Mat format (data points to internal Aravis buffer)
 };
 
 
@@ -187,12 +187,12 @@ CvCaptureCAM_Aravis::CvCaptureCAM_Aravis()
     xoffset = yoffset = width = height = 0;
     fpsMin = fpsMax = gainMin = gainMax = exposureMin = exposureMax = 0;
     controlExposure = false;
+    meteringMode = 0;
     exposureCompensation = 0;
     targetGrey = 0;
     frameID = prevFrameID = 0;
 
-    num_buffers = 10;
-    frame = NULL;
+    frame = cv::Mat();
 }
 
 void CvCaptureCAM_Aravis::close()
@@ -245,6 +245,7 @@ bool CvCaptureCAM_Aravis::init_buffers()
         }
         payload = arv_camera_get_payload (camera);
 
+        int num_buffers = bufferSize * fps;
         for (int i = 0; i < num_buffers; i++)
             arv_stream_push_buffer(stream, arv_buffer_new(payload, NULL));
 
@@ -317,48 +318,33 @@ bool CvCaptureCAM_Aravis::grabFrame()
 IplImage* CvCaptureCAM_Aravis::retrieveFrame(int)
 {
     if(framebuffer) {
-        int depth = 0, channels = 0;
+        int type = 0;
         switch(pixelFormat) {
+            default:
             case ARV_PIXEL_FORMAT_MONO_8:
             case ARV_PIXEL_FORMAT_BAYER_GR_8:
-                depth = IPL_DEPTH_8U;
-                channels = 1;
+                type = CV_8UC1;
                 break;
             case ARV_PIXEL_FORMAT_MONO_12:
             case ARV_PIXEL_FORMAT_MONO_16:
-                depth = IPL_DEPTH_16U;
-                channels = 1;
+                type = CV_16UC1;
                 break;
         }
-        if(depth && channels) {
-            IplImage src;
-            cvInitImageHeader( &src, cvSize( width, height ), depth, channels, IPL_ORIGIN_TL, 4 );
+        frame = cv::Mat(height, width, type, framebuffer);
 
-            cvSetData( &src, framebuffer, src.widthStep );
-            if( !frame ||
-                 frame->width != src.width ||
-                 frame->height != src.height ||
-                 frame->depth != src.depth ||
-                 frame->nChannels != src.nChannels) {
-
-                cvReleaseImage( &frame );
-                frame = cvCreateImage( cvGetSize(&src), src.depth, channels );
-            }
-            cvCopy(&src, frame);
-
-            if(controlExposure && ((frameID - prevFrameID) >= 3)) {
-                // control exposure every third frame
-                // i.e. skip frame taken with previous exposure setup
-                autoExposureControl(frame);
-            }
-
-            return frame;
+        if(controlExposure && ((frameID - prevFrameID) >= (fps/2))) {
+            // control exposure every third frame
+            // i.e. skip frame taken with previous exposure setup
+            autoExposureControl(frame);
         }
+
+        static IplImage iplimg = frame;
+        return &iplimg;
     }
     return NULL;
 }
 
-void CvCaptureCAM_Aravis::autoExposureControl(IplImage* image)
+void CvCaptureCAM_Aravis::autoExposureControl(cv::Mat m)
 {
     // Software control of exposure parameters utilizing
     // automatic change of exposure time & gain
@@ -366,11 +352,24 @@ void CvCaptureCAM_Aravis::autoExposureControl(IplImage* image)
     // Priority is set as follows:
     // - to increase brightness, first increase time then gain
     // - to decrease brightness, first decrease gain then time
-
-    cv::Mat m = cv::cvarrToMat(image);
+    cv::Rect r;
+    if(meteringMode > 1) {
+        cv::Size rs;
+        if(meteringMode == 2) {
+            // center 5%
+            rs = m.size() / 20;
+        } else {
+            // center 20%
+            rs = m.size() / 5;
+        }
+        r = cv::Rect(cv::Point((m.cols-rs.width)/2, (m.rows-rs.height)/2), rs);
+    } else {
+        // whole image
+        r = cv::Rect(cv::Point(0,0), m.size());
+    }
 
     // calc mean value for luminance or green channel
-    double brightness = cv::mean(m)[image->nChannels > 1 ? 1 : 0];
+    double brightness = cv::mean(m(r))[m.channels() > 1 ? 1 : 0];
     if(brightness < 1) brightness = 1;
 
     // mid point - 100 % means no change
@@ -437,6 +436,9 @@ void CvCaptureCAM_Aravis::autoExposureControl(IplImage* image)
 double CvCaptureCAM_Aravis::getProperty( int property_id ) const
 {
     switch(property_id) {
+        case CV_CAP_PROP_BUFFERSIZE:
+            return (double)bufferSize;
+
         case CV_CAP_PROP_POS_MSEC:
             return (double)frameID/fps;
 
@@ -447,7 +449,7 @@ double CvCaptureCAM_Aravis::getProperty( int property_id ) const
             return regionHeight;
 
         case CV_CAP_PROP_AUTO_EXPOSURE:
-            return (controlExposure ? 1 : 0);
+            return (controlExposure ? meteringMode : 0);
 
         case CV_CAP_PROP_BRIGHTNESS:
             return exposureCompensation;
@@ -486,15 +488,6 @@ double CvCaptureCAM_Aravis::getProperty( int property_id ) const
                 }
             }
             break;
-
-        case CV_CAP_PROP_BUFFERSIZE:
-            if(stream) {
-                int in, out;
-                arv_stream_get_n_buffers(stream, &in, &out);
-                // return number of available buffers in Aravis output queue
-                return out;
-            }
-            break;
     }
     return -1.0;
 }
@@ -502,6 +495,12 @@ double CvCaptureCAM_Aravis::getProperty( int property_id ) const
 bool CvCaptureCAM_Aravis::setProperty( int property_id, double value )
 {
     switch(property_id) {
+        case CV_CAP_PROP_BUFFERSIZE:
+            bufferSize = CLIP(value, 1., 60.);
+            stopCapture();
+            startCapture();
+            break;
+
         case CV_CAP_PROP_FRAME_WIDTH:
             if((int)value != regionWidth) {
                 regionWidth = value;
@@ -524,7 +523,8 @@ bool CvCaptureCAM_Aravis::setProperty( int property_id, double value )
 
         case CV_CAP_PROP_AUTO_EXPOSURE:
             if(exposureAvailable || gainAvailable) {
-                if( (controlExposure = (bool)(int)value) ) {
+                meteringMode = (int)value;
+                if( (controlExposure = (bool)meteringMode) ) {
                     exposure = exposureAvailable ? arv_camera_get_exposure_time(camera) : 0;
                     gain = gainAvailable ? arv_camera_get_gain(camera) : 0;
                 }
@@ -591,18 +591,6 @@ bool CvCaptureCAM_Aravis::setProperty( int property_id, double value )
                 }
             }
             break;
-
-        case CV_CAP_PROP_BUFFERSIZE:
-            {
-                int x = (int)value;
-                if((x > 0) && (x != num_buffers)) {
-                    stopCapture();
-                    num_buffers = x;
-                    startCapture();
-                }
-            }
-            break;
-
 
         default:
             return false;
