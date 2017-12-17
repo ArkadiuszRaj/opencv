@@ -62,7 +62,8 @@
 //
 // Supported properties:
 //  read/write
-//      CAP_PROP_AUTO_EXPOSURE(e), e >=0 use autoexposure, 1-whole image, 2-center 5%, 3-center 20%
+//      CAP_PROP_AUTO_EXPOSURE(e), e >=0 use autoexposure,
+//      CAP_PROP_METERING(m), 0-whole image, 1-center 5%, 2-center 20%, 3-top half, 4-bottom half
 //      CAP_PROP_EXPOSURE(t), t in seconds
 //      CAP_PROP_BRIGHTNESS (ev), exposure compensation in EV for auto exposure algorithm
 //      CAP_PROP_GAIN(g), g >=0 or -1 for automatic control if CAP_PROP_AUTO_EXPOSURE is true
@@ -353,16 +354,30 @@ void CvCaptureCAM_Aravis::autoExposureControl(cv::Mat m)
     // - to increase brightness, first increase time then gain
     // - to decrease brightness, first decrease gain then time
     cv::Rect r;
-    if(meteringMode > 1) {
+    if(meteringMode > 0) {
         cv::Size rs;
-        if(meteringMode == 2) {
-            // center 5%
-            rs = m.size() / 20;
-        } else {
-            // center 20%
-            rs = m.size() / 5;
+        switch(meteringMode) {
+            case 1:
+                // center 5%
+                rs = m.size() / 20;
+                r = cv::Rect(cv::Point((m.cols-rs.width)/2, (m.rows-rs.height)/2), rs);
+                break;
+            case 2:
+                // center 20%
+                rs = m.size() / 5;
+                r = cv::Rect(cv::Point((m.cols-rs.width)/2, (m.rows-rs.height)/2), rs);
+                break;
+            case 3:
+                // top half
+                rs = cv::Size(m.cols, m.rows / 2);
+                r = cv::Rect(cv::Point(0,0), rs);
+                break;
+            case 4:
+                // center 20%
+                rs = cv::Size(m.cols, m.rows / 2);
+                r = cv::Rect(cv::Point(0, m.rows / 2), rs);
+                break;
         }
-        r = cv::Rect(cv::Point((m.cols-rs.width)/2, (m.rows-rs.height)/2), rs);
     } else {
         // whole image
         r = cv::Rect(cv::Point(0,0), m.size());
@@ -448,8 +463,11 @@ double CvCaptureCAM_Aravis::getProperty( int property_id ) const
         case CV_CAP_PROP_FRAME_HEIGHT:
             return regionHeight;
 
+        case CV_CAP_PROP_METERING:
+            return meteringMode;
+
         case CV_CAP_PROP_AUTO_EXPOSURE:
-            return (controlExposure ? meteringMode : 0);
+            return (controlExposure ? 1 : 0);
 
         case CV_CAP_PROP_BRIGHTNESS:
             return exposureCompensation;
@@ -521,10 +539,13 @@ bool CvCaptureCAM_Aravis::setProperty( int property_id, double value )
             }
             break;
 
+        case CV_CAP_PROP_METERING:
+            meteringMode = (int)value;
+            break;
+
         case CV_CAP_PROP_AUTO_EXPOSURE:
             if(exposureAvailable || gainAvailable) {
-                meteringMode = (int)value;
-                if( (controlExposure = (bool)meteringMode) ) {
+                if( (controlExposure = (bool)(int)value) ) {
                     exposure = exposureAvailable ? arv_camera_get_exposure_time(camera) : 0;
                     gain = gainAvailable ? arv_camera_get_gain(camera) : 0;
                 }
