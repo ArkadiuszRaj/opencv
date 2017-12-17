@@ -333,8 +333,8 @@ IplImage* CvCaptureCAM_Aravis::retrieveFrame(int)
         frame = cv::Mat(height, width, type, framebuffer);
 
         if(controlExposure && ((frameID - prevFrameID) >= (fps/2))) {
-            // control exposure every third frame
-            // i.e. skip frame taken with previous exposure setup
+            // control exposure every half a second
+            // i.e. skip frames taken with previous exposure setup
             autoExposureControl(frame);
         }
 
