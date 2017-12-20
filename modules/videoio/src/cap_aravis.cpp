@@ -183,6 +183,7 @@ CvCaptureCAM_Aravis::CvCaptureCAM_Aravis()
     framebuffer = NULL;
 
     payload = 0;
+    bufferSize = 1;
 
     widthMin = widthMax = heightMin = heightMax = 0;
     xoffset = yoffset = width = height = 0;
@@ -357,22 +358,22 @@ void CvCaptureCAM_Aravis::autoExposureControl(cv::Mat m)
     if(meteringMode > 0) {
         cv::Size rs;
         switch(meteringMode) {
-            case 1:
+            case CAP_METERING_CENTER_5:
                 // center 5%
                 rs = m.size() / 20;
                 r = cv::Rect(cv::Point((m.cols-rs.width)/2, (m.rows-rs.height)/2), rs);
                 break;
-            case 2:
+            case CAP_METERING_CENTER_20:
                 // center 20%
                 rs = m.size() / 5;
                 r = cv::Rect(cv::Point((m.cols-rs.width)/2, (m.rows-rs.height)/2), rs);
                 break;
-            case 3:
+            case CAP_METERING_TOPHALF:
                 // top half
                 rs = cv::Size(m.cols, m.rows / 2);
                 r = cv::Rect(cv::Point(0,0), rs);
                 break;
-            case 4:
+            case CAP_METERING_BOTTOMHALF:
                 // center 20%
                 rs = cv::Size(m.cols, m.rows / 2);
                 r = cv::Rect(cv::Point(0, m.rows / 2), rs);

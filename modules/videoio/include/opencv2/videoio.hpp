@@ -168,6 +168,16 @@ enum VideoCaptureProperties {
        CAP_PROP_METERING      =40
      };
 
+/** @brief Metering mode identifiers, specifies image area used for automatic exposure.
+@note Currently, these are supported through the Aravis backend only.
+*/
+enum VideoCaptureMeteringModes {
+       CAP_METERING_FULL       = 0, //!< Full image
+       CAP_METERING_CENTER_5   = 1, //!< Center of image, 5% of it, rectangular area
+       CAP_METERING_CENTER_20  = 2, //!< Center of image, 20% of it, rectangular area
+       CAP_METERING_TOPHALF    = 3, //!< Horizontal top half of image
+       CAP_METERING_BOTTOMHALF = 4  //!< Horizontal bottom half of image
+     };
 
 /** @brief Generic camera output modes identifier.
 @note Currently, these are supported through the libv4l backend only.
