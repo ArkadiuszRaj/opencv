@@ -1,8 +1,11 @@
-#include <opencv2/opencv.hpp>
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/ml.hpp>
 
 using namespace cv;
 
-class TravelSalesman : public ml::SimulatedAnnealingSolverSystem
+class TravelSalesman
 {
 private :
     const std::vector<Point>& posCity;
@@ -16,12 +19,12 @@ public:
     {
         rng = theRNG();
     }
-    /** Give energy value for  a state of system.*/
-    /*virtual*/ double energy() const;
-    /** Function which change the state of system (random pertubation).*/
-    /*virtual*/ void changeState();
+    /** Give energy value for a state of system.*/
+    double energy() const;
+    /** Function which change the state of system (random perturbation).*/
+    void changeState();
     /** Function to reverse to the previous state.*/
-    /*virtual*/ void reverseState();
+    void reverseState();
 
 };
 
@@ -81,31 +84,24 @@ int main(void)
         posCity[i].y = static_cast<int>(radius*sin(theta)) + center.y;
         next[i]=(i+1)%nbCity;
     }
-    Ptr<TravelSalesman> ts_system(new TravelSalesman(posCity, next));
-    ml::SimulatedAnnealingSolver ts(ts_system);
+    TravelSalesman ts_system(posCity, next);
 
-    ts.setIterPerStep(10000*nbCity);
-    ts.setCoolingRatio(0.99);
-    ts.setInitialTemperature(100);
-    ts.setFinalTemperature(100*0.97);
     DrawTravelMap(img,posCity,next);
     imshow("Map",img);
     waitKey(10);
+    double currentTemperature = 100.0;
     for (int i = 0, zeroChanges = 0; zeroChanges < 10; i++)
     {
-        int changesApplied = ts.run();
-        img = Mat::zeros(img.size(),CV_8UC3);
+        int changesApplied = ml::simulatedAnnealingSolver(ts_system, currentTemperature, currentTemperature*0.97, 0.99, 10000*nbCity, &currentTemperature, rng);
+        img.setTo(Scalar::all(0));
         DrawTravelMap(img, posCity, next);
         imshow("Map", img);
         int k = waitKey(10);
-        double ti=ts.getFinalTemperature();
-        std::cout << "i=" << i << " changesApplied=" << changesApplied << " temp=" << ti << " result=" << ts_system->energy() << std::endl;
+        std::cout << "i=" << i << " changesApplied=" << changesApplied << " temp=" << currentTemperature << " result=" << ts_system.energy() << std::endl;
         if (k == 27 || k == 'q' || k == 'Q')
             return 0;
         if (changesApplied == 0)
             zeroChanges++;
-        ts.setInitialTemperature(ti);
-        ts.setFinalTemperature(ti*0.97);
     }
     std::cout << "Done" << std::endl;
     waitKey(0);

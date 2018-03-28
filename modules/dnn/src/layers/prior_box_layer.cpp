@@ -42,9 +42,14 @@
 
 #include "../precomp.hpp"
 #include "layers_common.hpp"
+#include "../op_inf_engine.hpp"
 #include <float.h>
 #include <algorithm>
 #include <cmath>
+
+#ifdef HAVE_OPENCL
+#include "opencl_kernels_dnn.hpp"
+#endif
 
 namespace cv
 {
@@ -104,15 +109,11 @@ public:
         for (int i = 0; i < aspectRatioParameter.size(); ++i)
         {
             float aspectRatio = aspectRatioParameter.get<float>(i);
-            bool alreadyExists = false;
+            bool alreadyExists = fabs(aspectRatio - 1.f) < 1e-6f;
 
-            for (size_t j = 0; j < _aspectRatios.size(); ++j)
+            for (size_t j = 0; j < _aspectRatios.size() && !alreadyExists; ++j)
             {
-                if (fabs(aspectRatio - _aspectRatios[j]) < 1e-6)
-                {
-                    alreadyExists = true;
-                    break;
-                }
+                alreadyExists = fabs(aspectRatio - _aspectRatios[j]) < 1e-6;
             }
             if (!alreadyExists)
             {
@@ -177,7 +178,6 @@ public:
     }
 
     PriorBoxLayerImpl(const LayerParams &params)
-        : _boxWidth(0), _boxHeight(0)
     {
         setParamsFrom(params);
         _minSize = getParameter<float>(params, "min_size", 0, false, 0);
@@ -185,36 +185,55 @@ public:
         _clip = getParameter<bool>(params, "clip", 0, false, true);
         _bboxesNormalized = getParameter<bool>(params, "normalized_bbox", 0, false, true);
 
-        _scales.clear();
         _aspectRatios.clear();
 
         getAspectRatios(params);
         getVariance(params);
-        getParams("scales", params, &_scales);
-        getParams("width", params, &_widths);
-        getParams("height", params, &_heights);
-        _explicitSizes = !_widths.empty();
-        CV_Assert(_widths.size() == _heights.size());
-
-        if (_explicitSizes)
-        {
-            CV_Assert(_aspectRatios.empty(), !params.has("min_size"), !params.has("max_size"));
-            _numPriors = _widths.size();
-        }
-        else
-        {
-            CV_Assert(!_aspectRatios.empty(), _minSize > 0);
-            _numPriors = _aspectRatios.size() + 1;  // + 1 for an aspect ratio 1.0
-        }
 
         _maxSize = -1;
         if (params.has("max_size"))
         {
             _maxSize = params.get("max_size").get<float>(0);
             CV_Assert(_maxSize > _minSize);
-
-            _numPriors += 1;
         }
+
+        std::vector<float> widths, heights;
+        getParams("width", params, &widths);
+        getParams("height", params, &heights);
+        _explicitSizes = !widths.empty();
+        CV_Assert(widths.size() == heights.size());
+
+        if (_explicitSizes)
+        {
+            CV_Assert(_aspectRatios.empty(), !params.has("min_size"), !params.has("max_size"));
+            _boxWidths = widths;
+            _boxHeights = heights;
+        }
+        else
+        {
+            CV_Assert(_minSize > 0);
+            _boxWidths.resize(1 + (_maxSize > 0 ? 1 : 0) + _aspectRatios.size());
+            _boxHeights.resize(_boxWidths.size());
+            _boxWidths[0] = _boxHeights[0] = _minSize;
+
+            int i = 1;
+            if (_maxSize > 0)
+            {
+                // second prior: aspect_ratio = 1, size = sqrt(min_size * max_size)
+                _boxWidths[i] = _boxHeights[i] = sqrt(_minSize * _maxSize);
+                i += 1;
+            }
+
+            // rest of priors
+            for (size_t r = 0; r < _aspectRatios.size(); ++r)
+            {
+                float arSqrt = sqrt(_aspectRatios[r]);
+                _boxWidths[i + r] = _minSize * arSqrt;
+                _boxHeights[i + r] = _minSize / arSqrt;
+            }
+        }
+        CV_Assert(_boxWidths.size() == _boxHeights.size());
+        _numPriors = _boxWidths.size();
 
         if (params.has("step_h") || params.has("step_w")) {
           CV_Assert(!params.has("step"));
@@ -247,6 +266,12 @@ public:
         }
     }
 
+    virtual bool supportBackend(int backendId)
+    {
+        return backendId == DNN_BACKEND_DEFAULT ||
+               backendId == DNN_BACKEND_INFERENCE_ENGINE && haveInfEngine() && !_explicitSizes;
+    }
+
     bool getMemoryShapes(const std::vector<MatShape> &inputs,
                          const int requiredOutputs,
                          std::vector<MatShape> &outputs,
@@ -270,10 +295,104 @@ public:
         return false;
     }
 
+#ifdef HAVE_OPENCL
+    bool forward_ocl(InputArrayOfArrays inps, OutputArrayOfArrays outs, OutputArrayOfArrays internals)
+    {
+        std::vector<UMat> inputs;
+        std::vector<UMat> outputs;
+
+        inps.getUMatVector(inputs);
+        outs.getUMatVector(outputs);
+
+        int _layerWidth = inputs[0].size[3];
+        int _layerHeight = inputs[0].size[2];
+
+        int _imageWidth = inputs[1].size[3];
+        int _imageHeight = inputs[1].size[2];
+
+        float stepX, stepY;
+        if (_stepX == 0 || _stepY == 0)
+        {
+            stepX = static_cast<float>(_imageWidth) / _layerWidth;
+            stepY = static_cast<float>(_imageHeight) / _layerHeight;
+        } else {
+            stepX = _stepX;
+            stepY = _stepY;
+        }
+
+        if (umat_offsetsX.empty())
+        {
+            Mat offsetsX(1, _offsetsX.size(), CV_32FC1, &_offsetsX[0]);
+            Mat offsetsY(1, _offsetsY.size(), CV_32FC1, &_offsetsY[0]);
+            Mat variance(1, _variance.size(), CV_32FC1, &_variance[0]);
+            Mat widths(1, _boxWidths.size(), CV_32FC1, &_boxWidths[0]);
+            Mat heights(1, _boxHeights.size(), CV_32FC1, &_boxHeights[0]);
+
+            offsetsX.copyTo(umat_offsetsX);
+            offsetsY.copyTo(umat_offsetsY);
+            variance.copyTo(umat_variance);
+            widths.copyTo(umat_widths);
+            heights.copyTo(umat_heights);
+        }
+
+        size_t nthreads = _layerHeight * _layerWidth;
+
+        ocl::Kernel kernel("prior_box", ocl::dnn::prior_box_oclsrc);
+        kernel.set(0, (int)nthreads);
+        kernel.set(1, (float)stepX);
+        kernel.set(2, (float)stepY);
+        kernel.set(3, ocl::KernelArg::PtrReadOnly(umat_offsetsX));
+        kernel.set(4, ocl::KernelArg::PtrReadOnly(umat_offsetsY));
+        kernel.set(5, (int)_offsetsX.size());
+        kernel.set(6, ocl::KernelArg::PtrReadOnly(umat_widths));
+        kernel.set(7, ocl::KernelArg::PtrReadOnly(umat_heights));
+        kernel.set(8, (int)_boxWidths.size());
+        kernel.set(9, ocl::KernelArg::PtrWriteOnly(outputs[0]));
+        kernel.set(10, (int)_layerHeight);
+        kernel.set(11, (int)_layerWidth);
+        kernel.set(12, (int)_imageHeight);
+        kernel.set(13, (int)_imageWidth);
+        kernel.run(1, &nthreads, NULL, false);
+
+        // clip the prior's coordidate such that it is within [0, 1]
+        if (_clip)
+        {
+            Mat mat = outputs[0].getMat(ACCESS_READ);
+            int aspect_count = (_maxSize > 0) ? 1 : 0;
+            int offset = nthreads * 4 * _offsetsX.size() * (1 + aspect_count + _aspectRatios.size());
+            float* outputPtr = mat.ptr<float>() + offset;
+            int _outChannelSize = _layerHeight * _layerWidth * _numPriors * 4;
+            for (size_t d = 0; d < _outChannelSize; ++d)
+            {
+                outputPtr[d] = std::min<float>(std::max<float>(outputPtr[d], 0.), 1.);
+            }
+        }
+
+        // set the variance.
+        {
+            ocl::Kernel kernel("set_variance", ocl::dnn::prior_box_oclsrc);
+            int offset = total(shape(outputs[0]), 2);
+            size_t nthreads = _layerHeight * _layerWidth * _numPriors;
+            kernel.set(0, (int)nthreads);
+            kernel.set(1, (int)offset);
+            kernel.set(2, (int)_variance.size());
+            kernel.set(3, ocl::KernelArg::PtrReadOnly(umat_variance));
+            kernel.set(4, ocl::KernelArg::PtrWriteOnly(outputs[0]));
+            if (!kernel.run(1, &nthreads, NULL, false))
+                return false;
+        }
+        return true;
+    }
+#endif
+
     void forward(InputArrayOfArrays inputs_arr, OutputArrayOfArrays outputs_arr, OutputArrayOfArrays internals_arr)
     {
         CV_TRACE_FUNCTION();
         CV_TRACE_ARG_VALUE(name, "name", name.c_str());
+
+        CV_OCL_RUN((preferableTarget == DNN_TARGET_OPENCL) &&
+                   OCL_PERFORMANCE_CHECK(ocl::Device::getDefault().isIntel()),
+                   forward_ocl(inputs_arr, outputs_arr, internals_arr))
 
         Layer::forward_fallback(inputs_arr, outputs_arr, internals_arr);
     }
@@ -284,12 +403,6 @@ public:
         CV_TRACE_ARG_VALUE(name, "name", name.c_str());
 
         CV_Assert(inputs.size() == 2);
-
-        size_t real_numPriors = _numPriors / pow(2, _offsetsX.size() - 1);
-        if (_scales.empty())
-            _scales.resize(real_numPriors, 1.0f);
-        else
-            CV_Assert(_scales.size() == real_numPriors);
 
         int _layerWidth = inputs[0]->size[3];
         int _layerHeight = inputs[0]->size[2];
@@ -309,62 +422,15 @@ public:
         int _outChannelSize = _layerHeight * _layerWidth * _numPriors * 4;
 
         float* outputPtr = outputs[0].ptr<float>();
+        float _boxWidth, _boxHeight;
         for (size_t h = 0; h < _layerHeight; ++h)
         {
             for (size_t w = 0; w < _layerWidth; ++w)
             {
-                // first prior: aspect_ratio = 1, size = min_size
-                if (_explicitSizes)
+                for (size_t i = 0; i < _boxWidths.size(); ++i)
                 {
-                    _boxWidth = _widths[0] * _scales[0];
-                    _boxHeight = _heights[0] * _scales[0];
-                }
-                else
-                    _boxWidth = _boxHeight = _minSize * _scales[0];
-
-                for (int i = 0; i < _offsetsX.size(); ++i)
-                {
-                    float center_x = (w + _offsetsX[i]) * stepX;
-                    float center_y = (h + _offsetsY[i]) * stepY;
-                    outputPtr = addPrior(center_x, center_y, _boxWidth, _boxHeight, _imageWidth,
-                                         _imageHeight, _bboxesNormalized, outputPtr);
-                }
-                if (_maxSize > 0)
-                {
-                    // second prior: aspect_ratio = 1, size = sqrt(min_size * max_size)
-                    _boxWidth = _boxHeight = sqrt(_minSize * _maxSize) * _scales[1];
-                    for (int i = 0; i < _offsetsX.size(); ++i)
-                    {
-                        float center_x = (w + _offsetsX[i]) * stepX;
-                        float center_y = (h + _offsetsY[i]) * stepY;
-                        outputPtr = addPrior(center_x, center_y, _boxWidth, _boxHeight, _imageWidth,
-                                             _imageHeight, _bboxesNormalized, outputPtr);
-                    }
-                }
-
-                // rest of priors
-                CV_Assert(_aspectRatios.empty() || (_maxSize > 0 ? 2 : 1) + _aspectRatios.size() == _scales.size());
-                for (size_t r = 0; r < _aspectRatios.size(); ++r)
-                {
-                    float ar = _aspectRatios[r];
-                    float scale = _scales[(_maxSize > 0 ? 2 : 1) + r];
-                    _boxWidth = _minSize * sqrt(ar) * scale;
-                    _boxHeight = _minSize / sqrt(ar) * scale;
-                    for (int i = 0; i < _offsetsX.size(); ++i)
-                    {
-                        float center_x = (w + _offsetsX[i]) * stepX;
-                        float center_y = (h + _offsetsY[i]) * stepY;
-                        outputPtr = addPrior(center_x, center_y, _boxWidth, _boxHeight, _imageWidth,
-                                             _imageHeight, _bboxesNormalized, outputPtr);
-                    }
-                }
-
-                // rest of sizes
-                CV_Assert(_widths.empty() || _widths.size() == _scales.size());
-                for (size_t i = 1; i < _widths.size(); ++i)
-                {
-                    _boxWidth = _widths[i] * _scales[i];
-                    _boxHeight = _heights[i] * _scales[i];
+                    _boxWidth = _boxWidths[i];
+                    _boxHeight = _boxHeights[i];
                     for (int j = 0; j < _offsetsX.size(); ++j)
                     {
                         float center_x = (w + _offsetsX[j]) * stepX;
@@ -410,6 +476,45 @@ public:
         }
     }
 
+    virtual Ptr<BackendNode> initInfEngine(const std::vector<Ptr<BackendWrapper> >&)
+    {
+#ifdef HAVE_INF_ENGINE
+        InferenceEngine::LayerParams lp;
+        lp.name = name;
+        lp.type = "PriorBox";
+        lp.precision = InferenceEngine::Precision::FP32;
+        std::shared_ptr<InferenceEngine::CNNLayer> ieLayer(new InferenceEngine::CNNLayer(lp));
+
+        ieLayer->params["min_size"] = format("%f", _minSize);
+        ieLayer->params["max_size"] = _maxSize > 0 ? format("%f", _maxSize) : "";
+
+        if (!_aspectRatios.empty())
+        {
+            ieLayer->params["aspect_ratio"] = format("%f", _aspectRatios[0]);
+            for (int i = 1; i < _aspectRatios.size(); ++i)
+                ieLayer->params["aspect_ratio"] += format(",%f", _aspectRatios[i]);
+        }
+
+        ieLayer->params["flip"] = _flip ? "1" : "0";
+        ieLayer->params["clip"] = _clip ? "1" : "0";
+
+        CV_Assert(!_variance.empty());
+        ieLayer->params["variance"] = format("%f", _variance[0]);
+        for (int i = 1; i < _variance.size(); ++i)
+            ieLayer->params["variance"] += format(",%f", _variance[i]);
+
+        ieLayer->params["step"] = _stepX == _stepY ? format("%f", _stepX) : "0";
+        ieLayer->params["step_h"] = _stepY;
+        ieLayer->params["step_w"] = _stepX;
+
+        CV_Assert(_offsetsX.size() == 1, _offsetsY.size() == 1, _offsetsX[0] == _offsetsY[0]);
+        ieLayer->params["offset"] = format("%f", _offsetsX[0]);;
+
+        return Ptr<BackendNode>(new InfEngineBackendNode(ieLayer));
+#endif  // HAVE_INF_ENGINE
+        return Ptr<BackendNode>();
+    }
+
     virtual int64 getFLOPS(const std::vector<MatShape> &inputs,
                            const std::vector<MatShape> &outputs) const
     {
@@ -428,18 +533,23 @@ private:
     float _minSize;
     float _maxSize;
 
-    float _boxWidth;
-    float _boxHeight;
-
     float _stepX, _stepY;
 
     std::vector<float> _aspectRatios;
     std::vector<float> _variance;
-    std::vector<float> _scales;
-    std::vector<float> _widths;
-    std::vector<float> _heights;
     std::vector<float> _offsetsX;
     std::vector<float> _offsetsY;
+    // Precomputed final widhts and heights based on aspect ratios or explicit sizes.
+    std::vector<float> _boxWidths;
+    std::vector<float> _boxHeights;
+
+#ifdef HAVE_OPENCL
+    UMat umat_offsetsX;
+    UMat umat_offsetsY;
+    UMat umat_widths;
+    UMat umat_heights;
+    UMat umat_variance;
+#endif
 
     bool _flip;
     bool _clip;

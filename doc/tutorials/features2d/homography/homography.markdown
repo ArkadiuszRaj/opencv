@@ -1,8 +1,10 @@
 Basic concepts of the homography explained with code {#tutorial_homography}
-=============================
+====================================================
 
-Introduction
-----
+@tableofcontents
+
+Introduction {#tutorial_homography_Introduction}
+============
 
 This tutorial will demonstrate the basic concepts of the homography with some codes.
 For detailed explanations about the theory, please refer to a computer vision course or a computer vision book, e.g.:
@@ -13,10 +15,10 @@ For detailed explanations about the theory, please refer to a computer vision co
 The tutorial code can be found [here](https://github.com/opencv/opencv/tree/master/samples/cpp/tutorial_code/features2D/Homography).
 The images used in this tutorial can be found [here](https://github.com/opencv/opencv/tree/master/samples/data) (`left*.jpg`).
 
-Basic theory
-----
+Basic theory {#tutorial_homography_Basic_theory}
+------------
 
-### What is the homography matrix?
+### What is the homography matrix? {#tutorial_homography_What_is_the_homography_matrix}
 
 Briefly, the planar homography relates the transformation between two planes (up to a scale factor):
 
@@ -61,7 +63,7 @@ The following examples show different kinds of transformation but all relate a t
 
 ![](images/homography_transformation_example3.jpg)
 
-### How the homography transformation can be useful?
+### How the homography transformation can be useful? {#tutorial_homography_How_the_homography_transformation_can_be_useful}
 
 *   Camera pose estimation from coplanar points for augmented reality with marker for instance (see the previous first example)
 
@@ -75,10 +77,10 @@ The following examples show different kinds of transformation but all relate a t
 
 ![](images/homography_panorama_stitching.jpg)
 
-Demonstration codes
-----
+Demonstration codes {#tutorial_homography_Demonstration_codes}
+-------------------
 
-### Demo 1: Pose estimation from coplanar points
+### Demo 1: Pose estimation from coplanar points {#tutorial_homography_Demo1}
 
 \note Please note that the code to estimate the camera pose from the homography is an example and you should use instead @ref cv::solvePnP if you want to estimate the camera pose for a planar or an arbitrary object.
 
@@ -89,31 +91,31 @@ This can be tested easily using a chessboard object and `findChessboardCorners()
 
 The first thing consists to detect the chessboard corners, the chessboard size (`patternSize`), here `9x6`, is required:
 
-@snippet tutorial_homography_ex1_pose_from_homography.cpp find-chessboard-corners
+@snippet pose_from_homography.cpp find-chessboard-corners
 
 ![](images/homography_pose_chessboard_corners.jpg)
 
 The object points expressed in the object frame can be computed easily knowing the size of a chessboard square:
 
-@snippet tutorial_homography_ex1_pose_from_homography.cpp compute-chessboard-object-points
+@snippet pose_from_homography.cpp compute-chessboard-object-points
 
 The coordinate `Z=0` must be removed for the homography estimation part:
 
-@snippet tutorial_homography_ex1_pose_from_homography.cpp compute-object-points
+@snippet pose_from_homography.cpp compute-object-points
 
 The image points expressed in the normalized camera can be computed from the corner points and by applying a reverse perspective transformation using the camera intrinsics and the distortion coefficients:
 
-@snippet tutorial_homography_ex1_pose_from_homography.cpp load-intrinsics
+@snippet pose_from_homography.cpp load-intrinsics
 
-@snippet tutorial_homography_ex1_pose_from_homography.cpp compute-image-points
+@snippet pose_from_homography.cpp compute-image-points
 
 The homography can then be estimated with:
 
-@snippet tutorial_homography_ex1_pose_from_homography.cpp estimate-homography
+@snippet pose_from_homography.cpp estimate-homography
 
 A quick solution to retrieve the pose from the homography matrix is (see \ref pose_ar "5"):
 
-@snippet tutorial_homography_ex1_pose_from_homography.cpp pose-from-homography
+@snippet pose_from_homography.cpp pose-from-homography
 
 \f[
   \begin{align*}
@@ -151,11 +153,16 @@ A quick solution to retrieve the pose from the homography matrix is (see \ref po
 
 This is a quick solution (see also \ref projective_transformations "2") as this does not ensure that the resulting rotation matrix will be orthogonal and the scale is estimated roughly by normalize the first column to 1.
 
+A solution to have a proper rotation matrix (with the properties of a rotation matrix) consists to apply a polar decomposition
+(see \ref polar_decomposition "6" or \ref polar_decomposition_svd "7" for some information):
+
+@snippet pose_from_homography.cpp polar-decomposition-of-the-rotation-matrix
+
 To check the result, the object frame projected into the image with the estimated camera pose is displayed:
 
 ![](images/homography_pose.jpg)
 
-### Demo 2: Perspective correction
+### Demo 2: Perspective correction {#tutorial_homography_Demo2}
 
 In this example, a source image will be transformed into a desired perspective view by computing the homography that maps the source points into the desired points.
 The following image shows the source image (left) and the chessboard view that we want to transform into the desired chessboard view (right).
@@ -164,15 +171,15 @@ The following image shows the source image (left) and the chessboard view that w
 
 The first step consists to detect the chessboard corners in the source and desired images:
 
-@snippet tutorial_homography_ex2_perspective_correction.cpp find-corners
+@snippet perspective_correction.cpp find-corners
 
 The homography is estimated easily with:
 
-@snippet tutorial_homography_ex2_perspective_correction.cpp estimate-homography
+@snippet perspective_correction.cpp estimate-homography
 
 To warp the source chessboard view into the desired chessboard view, we use @ref cv::warpPerspective
 
-@snippet tutorial_homography_ex2_perspective_correction.cpp warp-chessboard
+@snippet perspective_correction.cpp warp-chessboard
 
 The result image is:
 
@@ -180,13 +187,13 @@ The result image is:
 
 To compute the coordinates of the source corners transformed by the homography:
 
-@snippet tutorial_homography_ex2_perspective_correction.cpp compute-transformed-corners
+@snippet perspective_correction.cpp compute-transformed-corners
 
 To check the correctness of the calculation, the matching lines are displayed:
 
 ![](images/homography_perspective_correction_chessboard_matches.jpg)
 
-### Demo 3: Homography from the camera displacement
+### Demo 3: Homography from the camera displacement {#tutorial_homography_Demo3}
 
 The homography relates the transformation between two planes and it is possible to retrieve the corresponding camera displacement that allows to go from the first to the second plane view (see @cite Malis for more information).
 Before going into the details that allow to compute the homography from the camera displacement, some recalls about camera pose and homogeneous transformation.
@@ -295,13 +302,13 @@ To transform a 3D point expressed in the camera 1 frame to the camera 2 frame:
 
 In this example, we will compute the camera displacement between two camera poses with respect to the chessboard object. The first step consists to compute the camera poses for the two images:
 
-@snippet tutorial_homography_ex3_homography_from_camera_displacement.cpp compute-poses
+@snippet homography_from_camera_displacement.cpp compute-poses
 
 ![](images/homography_camera_displacement_poses.jpg)
 
 The camera displacement can be computed from the camera poses using the formulas above:
 
-@snippet tutorial_homography_ex3_homography_from_camera_displacement.cpp compute-c2Mc1
+@snippet homography_from_camera_displacement.cpp compute-c2Mc1
 
 The homography related to a specific plane computed from the camera displacement is:
 
@@ -320,11 +327,11 @@ the translation vector between the two camera frames.
 
 Here the normal vector `n` is the plane normal expressed in the camera frame 1 and can be computed as the cross product of 2 vectors (using 3 non collinear points that lie on the plane) or in our case directly with:
 
-@snippet tutorial_homography_ex3_homography_from_camera_displacement.cpp compute-plane-normal-at-camera-pose-1
+@snippet homography_from_camera_displacement.cpp compute-plane-normal-at-camera-pose-1
 
 The distance `d` can be computed as the dot product between the plane normal and a point on the plane or by computing the [plane equation](http://mathworld.wolfram.com/Plane.html) and using the D coefficient:
 
-@snippet tutorial_homography_ex3_homography_from_camera_displacement.cpp compute-plane-distance-to-the-camera-frame-1
+@snippet homography_from_camera_displacement.cpp compute-plane-distance-to-the-camera-frame-1
 
 The projective homography matrix \f$ \textbf{G} \f$ can be computed from the Euclidean homography \f$ \textbf{H} \f$ using the intrinsic matrix \f$ \textbf{K} \f$ (see @cite Malis), here assuming the same camera between the two plane views:
 
@@ -332,7 +339,7 @@ The projective homography matrix \f$ \textbf{G} \f$ can be computed from the Euc
   \textbf{G} = \gamma \textbf{K} \textbf{H} \textbf{K}^{-1}
 \f]
 
-@snippet tutorial_homography_ex3_homography_from_camera_displacement.cpp compute-homography
+@snippet homography_from_camera_displacement.cpp compute-homography
 
 In our case, the Z-axis of the chessboard goes inside the object whereas in the homography figure it goes outside. This is just a matter of sign:
 
@@ -340,7 +347,7 @@ In our case, the Z-axis of the chessboard goes inside the object whereas in the 
   ^{2}\textrm{H}_{1} = \hspace{0.2em} ^{2}\textrm{R}_{1} + \hspace{0.1em} \frac{^{2}\textrm{t}_{1} \cdot n^T}{d}
 \f]
 
-@snippet tutorial_homography_ex3_homography_from_camera_displacement.cpp compute-homography-from-camera-displacement
+@snippet homography_from_camera_displacement.cpp compute-homography-from-camera-displacement
 
 We will now compare the projective homography computed from the camera displacement with the one estimated with @ref cv::findHomography
 
@@ -363,16 +370,16 @@ The homography matrices are similar. If we compare the image 1 warped using both
 
 Visually, it is hard to distinguish a difference between the result image from the homography computed from the camera displacement and the one estimated with @ref cv::findHomography function.
 
-### Demo 4: Decompose the homography matrix
+### Demo 4: Decompose the homography matrix {#tutorial_homography_Demo4}
 
 OpenCV 3 contains the function @ref cv::decomposeHomographyMat which allows to decompose the homography matrix to a set of rotations, translations and plane normals.
 First we will decompose the homography matrix computed from the camera displacement:
 
-@snippet tutorial_homography_ex4_decompose_homography.cpp compute-homography-from-camera-displacement
+@snippet decompose_homography.cpp compute-homography-from-camera-displacement
 
 The results of @ref cv::decomposeHomographyMat are:
 
-@snippet tutorial_homography_ex4_decompose_homography.cpp decompose-homography-from-camera-displacement
+@snippet decompose_homography.cpp decompose-homography-from-camera-displacement
 
 ```
 Solution 0:
@@ -457,11 +464,66 @@ plane normal at camera 1 pose: [0.1973513139420654, -0.6283451996579068, 0.75248
 
 Again, there is also a solution that matches with the computed camera displacement.
 
-Additional references
-----
+### Demo 5: Basic panorama stitching from a rotating camera {#tutorial_homography_Demo5}
+
+\note This example is made to illustrate the concept of image stitching based on a pure rotational motion of the camera and should not be used to stitch panorama images.
+The [stitching module](@ref stitching) provides a complete pipeline to stitch images.
+
+The homography transformation applies only for planar structure. But in the case of a rotating camera (pure rotation around the camera axis of projection, no translation), an arbitrary world can be considered
+([see previously](@ref tutorial_homography_What_is_the_homography_matrix)).
+
+The homography can then be computed using the rotation transformation and the camera intrinsic parameters as (see for instance \ref homography_course "8"):
+
+\f[
+  s
+  \begin{bmatrix}
+  x^{'} \\
+  y^{'} \\
+  1
+  \end{bmatrix} =
+  \bf{K} \hspace{0.1em} \bf{R} \hspace{0.1em} \bf{K}^{-1}
+  \begin{bmatrix}
+  x \\
+  y \\
+  1
+  \end{bmatrix}
+\f]
+
+To illustrate, we used Blender, a free and open-source 3D computer graphics software, to generate two camera views with only a rotation transformation between each other.
+More information about how to retrieve the camera intrinsic parameters and the `3x4` extrinsic matrix with respect to the world can be found in \ref answer_blender "9" (an additional transformation
+is needed to get the transformation between the camera and the object frames) with Blender.
+
+The figure below shows the two generated views of the Suzanne model, with only a rotation transformation:
+
+![](images/homography_stitch_compare.jpg)
+
+With the known associated camera poses and the intrinsic parameters, the relative rotation between the two views can be computed:
+
+@snippet panorama_stitching_rotating_camera.cpp extract-rotation
+
+@snippet panorama_stitching_rotating_camera.cpp compute-rotation-displacement
+
+Here, the second image will be stitched with respect to the first image. The homography can be calculated using the formula above:
+
+@snippet panorama_stitching_rotating_camera.cpp compute-homography
+
+The stitching is made simply with:
+
+@snippet panorama_stitching_rotating_camera.cpp stitch
+
+The resulting image is:
+
+![](images/homography_stitch_Suzanne.jpg)
+
+Additional references {#tutorial_homography_Additional_references}
+---------------------
 
 *   \anchor lecture_16 1. [Lecture 16: Planar Homographies](http://www.cse.psu.edu/~rtc12/CSE486/lecture16.pdf), Robert Collins
 *   \anchor projective_transformations 2. [2D projective transformations (homographies)](https://ags.cs.uni-kl.de/fileadmin/inf_ags/3dcv-ws11-12/3DCV_WS11-12_lec04.pdf), Christiano Gava, Gabriele Bleser
 *   \anchor szeliski 3. [Computer Vision: Algorithms and Applications](http://szeliski.org/Book/drafts/SzeliskiBook_20100903_draft.pdf), Richard Szeliski
 *   \anchor answer_dsp 4. [Step by Step Camera Pose Estimation for Visual Tracking and Planar Markers](https://dsp.stackexchange.com/a/2737)
 *   \anchor pose_ar 5. [Pose from homography estimation](https://team.inria.fr/lagadic/camera_localization/tutorial-pose-dlt-planar-opencv.html)
+*   \anchor polar_decomposition 6. [Polar Decomposition (in Continuum Mechanics)](http://www.continuummechanics.org/polardecomposition.html)
+*   \anchor polar_decomposition_svd 7. [A Personal Interview with the Singular Value Decomposition](https://web.stanford.edu/~gavish/documents/SVD_ans_you.pdf), Matan Gavish
+*   \anchor homography_course 8. [Homography](http://people.scs.carleton.ca/~c_shu/Courses/comp4900d/notes/homography.pdf), Dr. Gerhard Roth
+*   \anchor answer_blender 9. [3x4 camera matrix from blender camera](https://blender.stackexchange.com/a/38210)

@@ -1269,7 +1269,7 @@ public:
     results for each of the sample cases. If the model is a classifier, it will return
     a Mat with samples + 1 rows, where the first row gives the class number and the
     following rows return the votes each class had for each sample.
-        @param samples Array containg the samples for which votes will be calculated.
+        @param samples Array containing the samples for which votes will be calculated.
         @param results Array where the result of the calculation will be written.
         @param flags Flags for defining the type of RTrees.
     */
@@ -1658,9 +1658,9 @@ public:
      */
     CV_WRAP virtual float predict( InputArray samples, OutputArray results=noArray(), int flags=0 ) const = 0;
 
-    /** @brief This function returns the trained paramters arranged across rows.
+    /** @brief This function returns the trained parameters arranged across rows.
 
-    For a two class classifcation problem, it returns a row matrix. It returns learnt paramters of
+    For a two class classifcation problem, it returns a row matrix. It returns learnt parameters of
     the Logistic Regression as a matrix of type CV_32F.
      */
     CV_WRAP virtual Mat get_learnt_thetas() const = 0;
@@ -1854,7 +1854,7 @@ public:
 
 
 /****************************************************************************************\
-*                           Auxilary functions declarations                              *
+*                           Auxiliary functions declarations                              *
 \****************************************************************************************/
 
 /** @brief Generates _sample_ from multivariate normal distribution
@@ -1912,74 +1912,48 @@ public:
 *                                   Simulated annealing solver                             *
 \****************************************************************************************/
 
-/** @brief The class defines interface for system state used in simulated annealing optimization algorithm.
+#ifdef CV_DOXYGEN
+/** @brief This class declares example interface for system state used in simulated annealing optimization algorithm.
 
-@cite Kirkpatrick83 for details
+@note This class is not defined in C++ code and can't be use directly - you need your own implementation with the same methods.
 */
-class CV_EXPORTS SimulatedAnnealingSolverSystem
+struct SimulatedAnnealingSolverSystem
 {
-protected:
-    inline SimulatedAnnealingSolverSystem() {}
-public:
-    virtual ~SimulatedAnnealingSolverSystem() {}
-
     /** Give energy value for a state of system.*/
-    virtual double energy() const = 0;
-    /** Function which change the state of system (random pertubation).*/
-    virtual void changeState() = 0;
+    double energy() const;
+    /** Function which change the state of system (random perturbation).*/
+    void changeState();
     /** Function to reverse to the previous state. Can be called once only after changeState(). */
-    virtual void reverseState() = 0;
+    void reverseState();
 };
+#endif // CV_DOXYGEN
 
 /** @brief The class implements simulated annealing for optimization.
- *
+
 @cite Kirkpatrick83 for details
+
+@param solverSystem optimization system (see SimulatedAnnealingSolverSystem)
+@param initialTemperature initial temperature
+@param finalTemperature final temperature
+@param coolingRatio temperature step multiplies
+@param iterationsPerStep number of iterations per temperature changing step
+@param lastTemperature optional output for last used temperature
+@param rngEnergy specify custom random numbers generator (cv::theRNG() by default)
 */
-class CV_EXPORTS SimulatedAnnealingSolver : public Algorithm
-{
-public:
-    SimulatedAnnealingSolver(const Ptr<SimulatedAnnealingSolverSystem>& system);
-    inline ~SimulatedAnnealingSolver() { release(); }
-
-    /** Simulated annealing procedure. */
-    int run();
-    /** Set/initialize RNG (energy).
-    @param rng new RNG
-    */
-    void setEnergyRNG(const RNG& rng);
-    /** Set initial temperature of simulated annealing procedure.
-    @param x new initial temperature. x\>0
-    */
-    void setInitialTemperature(double x);
-    /** Set final temperature of simulated annealing procedure.
-    @param x new final temperature value. 0\<x\<initial temperature
-    */
-    void setFinalTemperature(double x);
-    /** Get final temperature of simulated annealing procedure. */
-    double getFinalTemperature();
-    /** Set setCoolingRatio of simulated annealing procedure : T(t) = coolingRatio * T(t-1).
-    @param x new cooling ratio value. 0\<x\<1
-    */
-    void setCoolingRatio(double x);
-    /** Set number iteration per temperature step.
-    @param ite number of iteration per temperature step ite \> 0
-    */
-    void setIterPerStep(int ite);
-
-    void release();
-    SimulatedAnnealingSolver(const SimulatedAnnealingSolver&);
-    SimulatedAnnealingSolver& operator=(const SimulatedAnnealingSolver&);
-
-    struct Impl; friend struct Impl;
-protected:
-    Impl* impl;
-};
-
+template<class SimulatedAnnealingSolverSystem>
+int simulatedAnnealingSolver(SimulatedAnnealingSolverSystem& solverSystem,
+     double initialTemperature, double finalTemperature, double coolingRatio,
+     size_t iterationsPerStep,
+     CV_OUT double* lastTemperature = NULL,
+     cv::RNG& rngEnergy = cv::theRNG()
+);
 
 //! @} ml
 
 }
 }
+
+#include <opencv2/ml/ml.inl.hpp>
 
 #endif // __cplusplus
 #endif // OPENCV_ML_HPP

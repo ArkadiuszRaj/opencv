@@ -4,23 +4,25 @@
  * @author OpenCV team
  */
 
-#include <opencv2/opencv.hpp>
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/highgui.hpp>
+#include <iostream>
 
 void show_wait_destroy(const char* winname, cv::Mat img);
 
 using namespace std;
 using namespace cv;
 
-int main(int, char** argv)
+int main(int argc, char** argv)
 {
     //! [load_image]
-    // Load the image
-    Mat src = imread(argv[1]);
-
-    // Check if image is loaded fine
-    if(src.empty()){
-        printf(" Error opening image\n");
-        printf(" Program Arguments: [image_path]\n");
+    CommandLineParser parser(argc, argv, "{@input | ../data/notes.png | input image}");
+    Mat src = imread(parser.get<String>("@input"), IMREAD_COLOR);
+    if (src.empty())
+    {
+        cout << "Could not open or find the image!\n" << endl;
+        cout << "Usage: " << argv[0] << " <Input image>" << endl;
         return -1;
     }
 
@@ -34,7 +36,7 @@ int main(int, char** argv)
 
     if (src.channels() == 3)
     {
-        cvtColor(src, gray, CV_BGR2GRAY);
+        cvtColor(src, gray, COLOR_BGR2GRAY);
     }
     else
     {
@@ -48,7 +50,7 @@ int main(int, char** argv)
     //! [bin]
     // Apply adaptiveThreshold at the bitwise_not of gray, notice the ~ symbol
     Mat bw;
-    adaptiveThreshold(~gray, bw, 255, CV_ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY, 15, -2);
+    adaptiveThreshold(~gray, bw, 255, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY, 15, -2);
 
     // Show binary image
     show_wait_destroy("binary", bw);
@@ -104,7 +106,7 @@ int main(int, char** argv)
 
     // Step 1
     Mat edges;
-    adaptiveThreshold(vertical, edges, 255, CV_ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY, 3, -2);
+    adaptiveThreshold(vertical, edges, 255, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY, 3, -2);
     show_wait_destroy("edges", edges);
 
     // Step 2
